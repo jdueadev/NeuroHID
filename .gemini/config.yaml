@@ -1,4 +1,6 @@
-# Gemini Code Assist config. Install the app: https://github.com/apps/gemini-code-assist
+# Gemini settings alone do not enable reviews. Google currently documents an enterprise setup:
+# https://developers.google.com/gemini-code-assist/docs/review-github-code
+# Review availability and account requirements before enabling; activation is not verified here.
 have_fun: false
 code_review:
   disable: false
