@@ -1,0 +1,12 @@
+# Gemini settings alone do not enable reviews. Google currently documents an enterprise setup:
+# https://developers.google.com/gemini-code-assist/docs/review-github-code
+# Review availability and account requirements before enabling; activation is not verified here.
+have_fun: false
+code_review:
+  disable: false
+  comment_severity_threshold: MEDIUM
+  max_review_comments: -1
+  pull_request_opened:
+    help: false
+    summary: true
+    code_review: true
