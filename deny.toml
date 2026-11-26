@@ -1,0 +1,61 @@
+# Dependency policy, checked by `cargo deny check` inside scripts/check.ps1.
+# Based on NeuroClient's deny.toml.
+
+[graph]
+all-features = true
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+unmaintained = "workspace"
+unsound = "all"
+yanked = "deny"
+# Every exception names one advisory and says why it is here and when to revisit it.
+ignore = [
+    # PyO3 0.28: fixed in 0.29, which also needs numpy, pythonize and
+    # pyo3-async-runtimes moved to 0.29. Revisit by 2027-01-31.
+    { id = "RUSTSEC-2026-0176", reason = "needs the PyO3 0.29 upgrade" },
+    { id = "RUSTSEC-2026-0177", reason = "needs the PyO3 0.29 upgrade" },
+    # chrono is flagged unmaintained with no replacement named yet. Revisit by 2027-01-31.
+    { id = "RUSTSEC-2026-0543", reason = "no maintained replacement chosen yet" },
+]
+
+[bans]
+multiple-versions = "warn"
+# "warn", not "deny", only because crates/neurohid is publish = true while its six
+# neurohid-* path dependencies are publish = false, so `cargo publish -p neurohid`
+# can't succeed as things stand. Set this back to "deny" once that is settled.
+wildcards = "warn"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    "https://github.com/brainflow-dev/brainflow",
+    "https://github.com/labstreaminglayer/liblsl-rust.git",
+]
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "BSL-1.0",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    # serialport and option-ext. File-level copyleft: changes to their own files stay MPL.
+    "MPL-2.0",
+    # Fonts bundled by epaint_default_fonts (egui).
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]

@@ -181,8 +181,6 @@ auto-locate `neurohid-service`.
 
 Workflow coverage includes:
 
-- PR/push CI matrix (`ci.yml`)
-- Branch policy enforcement (`branch-policy.yml`)
+- PR/push CI (`ci.yml`), which runs `scripts/check.ps1`
 - Release checks on version tags (`release.yml`)
 - Manual publish workflow for crates (`publish-crates.yml`)
-- Python quality workflow (`python-quality.yml`)
