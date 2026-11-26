@@ -1,5 +1,9 @@
 name: CI
 
+# One check, the same one you run locally: pwsh scripts/check.ps1
+# The Linux job runs all of it. Windows and macOS run only the test suite,
+# because the lint, docs, dependency and Python checks don't change by OS.
+
 on:
   push:
     branches: [main]
@@ -9,82 +13,38 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  PYTHON_COVERAGE_MIN: "50"
-  RUST_COVERAGE_MIN: "32"
+  PYO3_PYTHON: python
 
 jobs:
-  determine-impact:
-    name: Determine Impact
-    runs-on: [windows-latest]
-    outputs:
-      rust: ${{ steps.impact.outputs.rust }}
-      python: ${{ steps.impact.outputs.python }}
-      docs: ${{ steps.impact.outputs.docs }}
-      protocol: ${{ steps.impact.outputs.protocol }}
-      architecture: ${{ steps.impact.outputs.architecture }}
-      unsafe: ${{ steps.impact.outputs.unsafe }}
-      automation: ${{ steps.impact.outputs.automation }}
-      required_checks: ${{ steps.impact.outputs.required_checks }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Classify change impact
-        id: impact
-        shell: pwsh
-        run: ./.github/scripts/classify-impact.ps1 -OutputJsonPath .github/automation/impact-output.json
-      - name: Upload impact artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: impact-output
-          path: .github/automation/impact-output.json
-
-  focused-gates:
-    name: Focused Gates
-    runs-on: [windows-latest]
-    needs: determine-impact
-    env:
-      PYO3_PYTHON: python
+  check:
+    name: Check
+    # Pinned, not ubuntu-latest: liblsl ships .debs for jammy and noble only,
+    # and ubuntu-latest moving past noble is what turned main red.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt, llvm-tools-preview
       - uses: astral-sh/setup-uv@v4
       - uses: Swatinem/rust-cache@v2
-      - name: Run canonical focused gates
-        shell: pwsh
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9,cargo-llvm-cov,cargo-deny
+      - name: Install LSL and keyring support
         run: |
-          $args = @('-File', './.github/scripts/run-agent-ready-tasks.ps1', '-RustScope', 'focused')
-          if ('${{ needs.determine-impact.outputs.rust }}' -ne 'true') { $args += '-SkipRust' }
-          if ('${{ needs.determine-impact.outputs.python }}' -eq 'true') { $args += '-WithPython' }
-          if ('${{ needs.determine-impact.outputs.docs }}' -eq 'true') { $args += '-WithDocs' }
-          if ('${{ needs.determine-impact.outputs.protocol }}' -eq 'true') { $args += '-WithProtocol' }
-          if ('${{ needs.determine-impact.outputs.unsafe }}' -eq 'true') { $args += '-WithUnsafe' }
-          & pwsh @args
+          bash ./.github/scripts/install-liblsl-linux.sh
+          sudo apt-get install -y dbus-x11 libsecret-1-dev gnome-keyring
+      - name: Check
+        shell: pwsh
+        run: ./scripts/check.ps1 -Coverage
 
-  test:
-    name: Test
-    needs: determine-impact
-    if: needs.determine-impact.outputs.rust == 'true' || github.event_name == 'push'
-    runs-on: ${{ matrix.runner }}
-    env:
-      PYO3_PYTHON: python
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux
-            runner_os: Linux
-            runner: ubuntu-latest
-            cache_key: ubuntu-latest
-          - platform: linux
-            runner_os: Linux
-            runner: ubuntu-22.04
-            cache_key: ubuntu-22.04
-          - platform: windows
-            runner_os: Windows
-            runner: windows-latest
-            cache_key: windows-latest
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -92,50 +52,19 @@ jobs:
           python-version: "3.14"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: test-${{ matrix.cache_key }}
-      - name: Setup Python import library (Windows)
-        if: matrix.runner_os == 'Windows'
-        shell: pwsh
-        run: ./.github/scripts/setup-python-lib-windows.ps1
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest@0.9
-      - name: Install LSL (Linux)
-        if: matrix.runner_os == 'Linux'
-        run: bash ./.github/scripts/install-liblsl-linux.sh
-      - name: Install keyring support (Linux)
-        if: matrix.runner_os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y dbus-x11 libsecret-1-dev gnome-keyring
-      - name: Build
-        run: cargo build --workspace
+      - name: Set up Python import library
+        shell: pwsh
+        run: ./.github/scripts/setup-python-lib-windows.ps1
       - name: Test
-        if: matrix.runner_os != 'Linux'
         run: cargo nextest run --workspace
-      - name: Test (Linux)
-        if: matrix.runner_os == 'Linux'
-        run: dbus-run-session -- cargo nextest run --workspace
-      - name: Extension outlet e2e
-        if: matrix.runner_os != 'Linux'
-        run: cargo nextest run -p neurohid-core --test extension_outlet_e2e
-      - name: Extension outlet e2e (Linux)
-        if: matrix.runner_os == 'Linux'
-        run: dbus-run-session -- cargo nextest run -p neurohid-core --test extension_outlet_e2e
-      - name: Pipeline integration
-        if: matrix.runner_os != 'Linux'
-        run: cargo nextest run -p neurohid-core --test pipeline_integration
-      - name: Pipeline integration (Linux)
-        if: matrix.runner_os == 'Linux'
-        run: dbus-run-session -- cargo nextest run -p neurohid-core --test pipeline_integration
 
   test-macos:
     name: Test (macOS)
-    needs: determine-impact
-    if: (needs.determine-impact.outputs.rust == 'true' || github.event_name == 'push') && vars.ENABLE_MACOS != 'false'
-    runs-on: [macos-latest]
-    env:
-      PYO3_PYTHON: python
+    if: vars.ENABLE_MACOS != 'false'
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -143,255 +72,8 @@ jobs:
           python-version: "3.14"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest@0.9
-      - name: Build
-        run: cargo build --workspace
       - name: Test
         run: cargo nextest run --workspace
-      - name: Extension outlet e2e
-        run: cargo nextest run -p neurohid-core --test extension_outlet_e2e
-      - name: Pipeline integration
-        run: cargo nextest run -p neurohid-core --test pipeline_integration
-
-  clippy:
-    name: Clippy
-    needs: determine-impact
-    if: needs.determine-impact.outputs.rust == 'true' || github.event_name == 'push'
-    runs-on: [ubuntu-latest]
-    env:
-      PYO3_PYTHON: python
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Install LSL
-        run: bash ./.github/scripts/install-liblsl-linux.sh
-      - name: Clippy
-        run: cargo clippy --workspace -- -A missing_docs -A unsafe_code -W clippy::undocumented_unsafe_blocks -W clippy::missing_safety_doc -D clippy::undocumented_unsafe_blocks -D clippy::missing_safety_doc
-
-  fmt:
-    name: Format
-    needs: determine-impact
-    if: needs.determine-impact.outputs.rust == 'true' || github.event_name == 'push'
-    runs-on: [ubuntu-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Format check
-        run: cargo fmt --check
-
-  framework-boundary:
-    name: Framework Boundary
-    needs: determine-impact
-    if: needs.determine-impact.outputs.rust == 'true' || needs.determine-impact.outputs.automation == 'true' || github.event_name == 'push'
-    runs-on: [ubuntu-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Check framework boundary
-        shell: pwsh
-        run: ./.github/scripts/check-framework-boundary.ps1
-
-  docs:
-    name: Documentation
-    needs: determine-impact
-    if: needs.determine-impact.outputs.rust == 'true' || github.event_name == 'push'
-    runs-on: [ubuntu-latest]
-    env:
-      PYO3_PYTHON: python
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install LSL
-        run: bash ./.github/scripts/install-liblsl-linux.sh
-      - name: Build docs
-        run: cargo doc --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings -A missing_docs
-
-  python-tests:
-    name: Python Tests
-    needs: determine-impact
-    if: needs.determine-impact.outputs.python == 'true' || github.event_name == 'push'
-    runs-on: [ubuntu-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v4
-      - uses: Swatinem/rust-cache@v2
-      - name: Install Python dependencies (builds Rust extension via maturin)
-        run: uv sync --directory python --extra dev
-      - name: Run Python tests with coverage gate
-        run: >
-          uv run --project python pytest python/tests -q
-          --cov=neurohid_ml --cov-branch --cov-report=term-missing --cov-report=xml
-          --cov-fail-under=${{ env.PYTHON_COVERAGE_MIN }}
-      - name: Upload Python coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-coverage-xml
-          path: python/coverage.xml
-      - name: Upload Python coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: python/coverage.xml
-          flags: python
-          name: python-coverage
-          fail_ci_if_error: false
-
-  e2e-service-client:
-    name: E2E Service + Python Client
-    needs: determine-impact
-    if: needs.determine-impact.outputs.rust == 'true' || needs.determine-impact.outputs.python == 'true' || github.event_name == 'push'
-    runs-on: [ubuntu-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v4
-      - uses: Swatinem/rust-cache@v2
-      - name: Install LSL (Linux)
-        run: bash ./.github/scripts/install-liblsl-linux.sh
-      - name: Build neurohid-service
-        run: cargo build -p neurohid-service
-      - name: Install Python dependencies
-        run: uv sync --directory python --extra dev
-      - name: Run E2E test (service + Python client)
-        run: uv run --project python pytest python/tests/test_e2e_service_client.py -v
-
-  ipc-compat-matrix:
-    name: IPC Compat Matrix
-    needs: determine-impact
-    if: needs.determine-impact.outputs.protocol == 'true' || github.event_name == 'push'
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux
-            transport: tcp_loopback
-            runner: [ubuntu-latest]
-          - platform: linux
-            transport: local_socket
-            runner: [ubuntu-latest]
-          - platform: windows
-            transport: tcp_loopback
-            runner: [windows-latest]
-          - platform: windows
-            transport: local_socket
-            runner: [windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v4
-      - uses: Swatinem/rust-cache@v2
-      - name: Install Python dependencies (builds Rust extension via maturin)
-        run: uv sync --directory python --extra dev
-      - name: Rust transport smoke (tcp_loopback)
-        if: matrix.transport == 'tcp_loopback'
-        run: cargo test -p neurohid-ipc explicit_tcp_transport_roundtrips_messages -- --nocapture
-      - name: Rust transport smoke (local_socket)
-        if: matrix.transport == 'local_socket'
-        run: cargo test -p neurohid-ipc explicit_local_socket_transport_roundtrips_messages -- --nocapture
-      - name: Unified service multiplexing smoke
-        run: cargo test -p neurohid-service runtime_events_subscription_does_not_block_control_rpc -- --nocapture
-      - name: Python IPC surface smoke
-        run: >
-          uv run --project python python -m unittest
-          python/tests/test_control_client.py
-          python/tests/test_bridge.py
-
-  rust-coverage:
-    name: Rust Coverage
-    needs: determine-impact
-    if: needs.determine-impact.outputs.rust == 'true' || github.event_name == 'push'
-    runs-on: [ubuntu-latest]
-    env:
-      PYO3_PYTHON: python
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install LSL
-        run: bash ./.github/scripts/install-liblsl-linux.sh
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Run Rust coverage gate
-        run: |
-          mkdir -p target/llvm-cov
-          cargo llvm-cov --workspace \
-            --lcov --output-path target/llvm-cov/lcov.info \
-            --summary-only \
-            --fail-under-lines ${{ env.RUST_COVERAGE_MIN }}
-      - name: Upload Rust coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-coverage-lcov
-          path: target/llvm-cov/lcov.info
-      - name: Upload Rust coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: target/llvm-cov/lcov.info
-          flags: rust
-          name: rust-coverage
-          fail_ci_if_error: false
-
-  unsafe-compliance:
-    name: Unsafe Compliance
-    needs: determine-impact
-    if: needs.determine-impact.outputs.unsafe == 'true' || github.event_name == 'push'
-    runs-on: [ubuntu-latest]
-    env:
-      PYO3_PYTHON: python
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - uses: Swatinem/rust-cache@v2
-      - name: Install LSL
-        run: bash ./.github/scripts/install-liblsl-linux.sh
-      - name: Validate unsafe compliance
-        shell: pwsh
-        run: ./.github/scripts/check-unsafe-compliance.ps1
-
-  protocol-contracts:
-    name: Protocol Contracts
-    needs: determine-impact
-    if: needs.determine-impact.outputs.protocol == 'true'
-    runs-on: [ubuntu-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Verify protocol contracts
-        shell: pwsh
-        run: ./.github/scripts/verify-protocol-contracts.ps1
