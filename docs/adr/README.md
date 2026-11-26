@@ -4,15 +4,14 @@ This directory contains Architecture Decision Records for the NeuroHID project.
 
 ## When to Write an ADR
 
-An ADR is required when a PR modifies architecture-gated paths:
+Write an ADR when a PR changes these paths:
 
 - `crates/neurohid-ipc/**`
 - `crates/neurohid-storage/**`
 - `crates/neurohid-core/**`
 - `docs/protocol-and-api.md`
 
-The CI `architecture-gate` workflow checks that the PR body references an ADR
-(e.g., `docs/adr/ADR-001-...`).
+Reference it in the PR body (e.g., `docs/adr/ADR-001-...`).
 
 ## Naming Convention
 

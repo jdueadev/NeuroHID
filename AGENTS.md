@@ -27,6 +27,11 @@
 - Constants: UPPER_SNAKE_CASE
 - Files: snake_case.py
 
+## Checks
+
+- Run `pwsh scripts/check.ps1` before you push. CI runs the same script, so a green local run
+  means a green Linux check.
+
 ## Git Workflow
 
 Use Conventional Commits:

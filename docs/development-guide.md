@@ -86,19 +86,20 @@ uv run --project python mypy python/src
 - CI passing means safe-to-merge for the scope exercised; flakiness is not masked by broad retries.
 - See the test tiers doc (when available) for isolation and flakiness-avoidance guidance.
 
-## Automation Harness Commands
+## The Check
 
-Run canonical local quality gates (same script family used by CI):
+One script runs every gate, locally and in CI:
 
 ```bash
-# Focused Rust + docs/protocol/unsafe policy checks
-pwsh -File ./.github/scripts/run-agent-ready-tasks.ps1 -RustScope focused -WithDocs -WithProtocol -WithUnsafe
-
-# Python-only quality gates
-pwsh -File ./.github/scripts/run-agent-ready-tasks.ps1 -SkipRust -WithPython
+pwsh scripts/check.ps1              # everything except the Rust coverage gate
+pwsh scripts/check.ps1 -Coverage    # also the Rust coverage gate, as CI runs it
+pwsh scripts/check.ps1 -SkipPython  # Rust only
 ```
 
-Impact-aware routing logic is implemented in `.github/scripts/classify-impact.ps1`.
+It runs fmt, clippy (undocumented `unsafe` is an error), rustdoc with warnings denied, the
+framework boundary check, `cargo deny check` (see `deny.toml`), the full nextest suite, and the
+Python ruff, black, mypy and pytest gates. CI runs it on `ubuntu-24.04` and runs the test suite
+alone on Windows and macOS.
 
 ## CI Runner Policy
 
@@ -106,9 +107,8 @@ Impact-aware routing logic is implemented in `.github/scripts/classify-impact.ps
   - Linux: `self-hosted`, `linux`, `neurohid-ci`
   - Windows: `self-hosted`, `windows`, `neurohid-ci`
   - macOS: `self-hosted`, `macos`, `neurohid-ci`
-- **Fallback:** The Test job also runs on GitHub-hosted `ubuntu-22.04` so that Linux tests can
-  complete when self-hosted Linux runners are unavailable. Self-hosted remains preferred for
-  performance and LSL/device tooling.
+- The Linux `Check` job is pinned to `ubuntu-24.04` because liblsl publishes `.deb` packages
+  for jammy and noble only.
 - `ci.yml` controls optional macOS execution with repository variable `ENABLE_MACOS`.
 - If macOS support is dropped temporarily, set `ENABLE_MACOS=false` in repo variables and align
   required checks in branch protection.
@@ -136,81 +136,25 @@ will run on these runners. See [GitHub: Adding self-hosted runners](https://docs
 
 ## Coverage Gates in CI
 
-- Python coverage gate is enforced with `PYTHON_COVERAGE_MIN` (currently `50`).
-- Rust coverage gate is enforced with `RUST_COVERAGE_MIN` (currently `35`).
-- Both gates upload coverage artifacts and report to Codecov.
-- **Source of truth:** The numeric thresholds are defined in `.github/workflows/ci.yml` (env); this doc is kept in sync with those values.
+- Python line coverage must stay at or above `50`% and Rust at or above `32`%.
+- **Source of truth:** `$PythonCoverageMin` and `$RustCoverageMin` at the top of
+  `scripts/check.ps1`.
 
 ## Branch Protection Required Checks
 
-Use these exact required status checks for `main` branch protection.
+Require these status checks on `main`:
 
-### Baseline required checks (always)
+- `Check`
+- `Test (Windows)`
+- `Test (macOS)` (drop it if you set `ENABLE_MACOS=false`)
 
-- `Enforce PR-only main updates`
-- `Determine Impact`
-- `Focused Gates`
-- `Test`
-- `Clippy`
-- `Format`
-- `Documentation`
-- `Python Tests`
-- `Rust Coverage`
-
-### macOS enabled (`ENABLE_MACOS` not set to `false`)
-
-- All baseline checks, plus:
-  - `Test (macOS)`
-
-### macOS disabled (`ENABLE_MACOS=false`)
-
-- Baseline checks only.
-- Remove `Test (macOS)` from required status checks.
-
-### Checks to keep non-required (path/condition scoped)
-
-- `Unsafe Compliance`
-- `Protocol Contracts`
-- `Python Quality`
-- `Architecture Gate / Check ADR reference in PR body`
-- `Crate Boundaries Gate / Require crate boundaries doc update for manifest changes`
-
-These run when relevant and should remain non-required to avoid branch-protection deadlocks when
-workflow path filters do not trigger.
-
-### Admin runbook (`gh` CLI)
-
-macOS enabled:
+PR-only updates to `main` are enforced by the repository ruleset, not by a workflow.
 
 ```bash
-gh api --method PATCH repos/jmduea/NeuroHID/branches/main/protection/required_status_checks \
+gh api --method PATCH repos/{owner}/{repo}/branches/main/protection/required_status_checks \
   -H "Accept: application/vnd.github+json" \
-  -f strict=true \
-  -f "contexts[]=Enforce PR-only main updates" \
-  -f "contexts[]=Determine Impact" \
-  -f "contexts[]=Focused Gates" \
-  -f "contexts[]=Test" \
-  -f "contexts[]=Test (macOS)" \
-  -f "contexts[]=Clippy" \
-  -f "contexts[]=Format" \
-  -f "contexts[]=Documentation" \
-  -f "contexts[]=Python Tests" \
-  -f "contexts[]=Rust Coverage"
-```
-
-macOS disabled (`ENABLE_MACOS=false`):
-
-```bash
-gh api --method PATCH repos/jmduea/NeuroHID/branches/main/protection/required_status_checks \
-  -H "Accept: application/vnd.github+json" \
-  -f strict=true \
-  -f "contexts[]=Enforce PR-only main updates" \
-  -f "contexts[]=Determine Impact" \
-  -f "contexts[]=Focused Gates" \
-  -f "contexts[]=Test" \
-  -f "contexts[]=Clippy" \
-  -f "contexts[]=Format" \
-  -f "contexts[]=Documentation" \
-  -f "contexts[]=Python Tests" \
-  -f "contexts[]=Rust Coverage"
+  -F strict=false \
+  -f "contexts[]=Check" \
+  -f "contexts[]=Test (Windows)" \
+  -f "contexts[]=Test (macOS)"
 ```

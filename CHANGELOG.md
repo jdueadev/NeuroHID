@@ -52,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI is one script, `scripts/check.ps1`, run by a single Linux `Check` job pinned to `ubuntu-24.04`, plus test-only jobs on Windows and macOS. It replaces impact routing, focused gates and the per-concern jobs, and fixes the red `main` caused by `ubuntu-latest` moving past the Ubuntu releases liblsl ships packages for
+- Dependency policy is enforced with `cargo deny check` (`deny.toml`)
 - **IPC type simplification**: removed `ControlRpcRequest`, `ControlRpcResponse`, `ControlRpcResponsePayload` wrapper types from `neurohid-ipc` — all IPC control paths now use `ControlRequest`/`ControlResponse` from `neurohid-types` directly (wire format unchanged)
 - **IPC type simplification**: merged `RuntimeMlKind` enum into `TrainerStreamKind` (identical variants, single canonical type)
 - **Config cleanup**: consolidated 19 serde default functions into struct-level `#[serde(default)]` + `Default` impls; deleted dead `ServiceState` from `neurohid-types::config`; deleted unused XDF parsing types from `neurohid-types::signal`
@@ -118,6 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed stale `_bmad/` directory reference from `docs/source-tree-analysis.md`
 
 ### Removed
+
+- `architecture-gate.yml`, `crate-boundaries-gate.yml`, `python-quality.yml` and `branch-policy.yml` workflows; `classify-impact.ps1`, `run-agent-ready-tasks.ps1`, `check-unsafe-compliance.ps1` and `verify-protocol-contracts.ps1` (folded into `scripts/check.ps1`, or covered by the repository ruleset)
+- Codecov uploads, `codecov.yml` and the README badge
 
 - `docs/runtime-ml-protocol-v2.md` — deprecated V2 protocol document superseded by v3
 - Merged `ipc_v2.rs` and `ipc_v3.rs` into unified `ipc.rs` in `neurohid-types`

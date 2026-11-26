@@ -66,7 +66,7 @@ uv run --project python pytest python/tests -q
 ## Branch and Release Policy
 
 - Do not push directly to `main`; all updates land via PR merge.
-- CI enforces branch policy via `.github/workflows/branch-policy.yml`.
+- Run `pwsh scripts/check.ps1` before you push; CI runs the same script.
 - Tag pushes (`v*`) run pre-release verification in `.github/workflows/release.yml`.
 - crates.io publishing is manual via `.github/workflows/publish-crates.yml`.
 - Required checks and branch-protection guidance live in
